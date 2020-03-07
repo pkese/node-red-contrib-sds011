@@ -10,7 +10,7 @@
     "type": "git",
     "url": "https://github.com/ikhayainkomishi/node-red-contrib-sds011.git"
   },
-  "dependencies": {
+  "optionalDependencies": {
     "serialport": "^6.1.1"
   },
   "keywords": [

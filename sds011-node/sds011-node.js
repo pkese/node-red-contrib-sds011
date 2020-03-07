@@ -1,7 +1,12 @@
-const SerialPort = require('serialport');
+var SerialPort;
+try {
+  SerialPort = require('serialport');
+} catch (err) {
+  SerialPort = null;
+}
 const net = require('net');
 
-const TCP_RECONNECT_TIME=10000;
+const TCP_RECONNECT_TIME = 10000;
 
 let node;
 let serialMode;
@@ -46,7 +51,7 @@ module.exports = function(RED) {
         host: params[0],
         port: Number(params[1])
       }
-      var tcpip = net.createConnection(tcpipOptions);
+      tcpip = net.createConnection(tcpipOptions);
       tcpip.on('connect', function () {
         node.status({fill: 'green', shape: 'dot', text: 'connected'});
       });
@@ -172,7 +177,7 @@ function sendBuffer(buffer) {
     serial.write(buffer, 'hex');
   }
   else {
-    tcpip.write(buffer, 'hex');
+    tcpip.write(buffer);
   }
 }
 
