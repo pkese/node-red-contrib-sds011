@@ -1,7 +1,12 @@
 const SerialPort = require('serialport');
+const net = require('net');
+
+const TCP_RECONNECT_TIME=10000;
 
 let node;
+let serialMode;
 let serial;
+let tcpip;
 let deviceId;
 
 module.exports = function(RED) {
@@ -9,29 +14,69 @@ module.exports = function(RED) {
     RED.nodes.createNode(this, config);
     node = this;
     deviceId = 0xFFFF;
-    serial = new SerialPort(config.port, {
-      baudRate: 9600,
-      parser: serialParser()
-    });
-    serial.on('open', function() {
-      node.log('Serial port is open');
-      node.status({fill: 'green', shape: 'dot', text: 'connected'});
-    });
-    serial.on('error', function(err) {
-      if (err) {
-        node.error('Serial port error', err);
+    
+    serialMode = !config.port.startsWith('tcp://');
+    if (serialMode) {
+      serial = new SerialPort(config.port, {
+        baudRate: 9600,
+        parser: serialParser()
+      });
+      serial.on('open', function() {
+        node.log('Serial port is open');
+        node.status({fill: 'green', shape: 'dot', text: 'connected'});
+      });
+      serial.on('error', function(err) {
+        if (err) {
+          node.error('Serial port error', err);
+        }
+        node.status({fill: 'red', shape: 'ring', text: 'error'});
+      });
+      serial.on('close', function() {
+        node.log('Serial port is closed');
+        node.status({fill: 'red', shape: 'ring', text: 'disconnected'});
+      });
+      let parser = serialParser();
+      serial.on('data', function(data) {
+        parser(data);
+      });  
+    }
+    else {
+      var params = config.port.substring(6).split(':')
+      var tcpipOptions = {
+        host: params[0],
+        port: Number(params[1])
       }
-      node.status({fill: 'red', shape: 'ring', text: 'error'});
-    });
-    serial.on('close', function() {
-      node.log('Serial port is closed');
-      node.status({fill: 'red', shape: 'ring', text: 'disconnected'});
-    });
-    let parser = serialParser();
-    serial.on('data', function(data) {
-      parser(data);
-    });
-
+      var tcpip = net.createConnection(tcpipOptions);
+      tcpip.on('connect', function () {
+        node.status({fill: 'green', shape: 'dot', text: 'connected'});
+      });
+      tcpip.on('error', function (err) {
+        console.error(JSON.stringify(err));
+        if (err) {
+          node.error('TCP connection error', err);
+        }
+        node.status({fill: 'red', shape: 'ring', text: 'error'});
+        setTimeout(function() {
+          tcpip.connect(tcpipOptions)
+        }, TCP_RECONNECT_TIME);
+      });
+      tcpip.on('end', function () {
+        node.status({fill: 'red', shape: 'ring', text: 'disconnected'});
+        setTimeout(function() {
+          tcpip.connect(tcpipOptions)
+        }, TCP_RECONNECT_TIME);
+      });
+      tcpip.on('timeout', function () {
+        setTimeout(function() {
+          tcpip.connect(tcpipOptions)
+        }, TCP_RECONNECT_TIME);
+      });
+      let parser = serialParser();
+      tcpip.on('data', function(data) {
+        parser(data);
+      });
+    }
+    
     node.on('input', function(msg) {
       let command;
       let parameter;
@@ -95,11 +140,20 @@ module.exports = function(RED) {
     });
 
     node.on('close', function() {
-      serial.close(function(err) {
-        if (err) {
-          node.error('Serial close error', err);
-        }
-      });
+      if (serialMode) {
+        serial.close(function(err) {
+          if (err) {
+            node.error('Serial close error', err);
+          }
+        });
+      }
+      else {
+        tcpip.close(function(err) {
+          if (err) {
+            node.error('TCP connection close error', err);
+          }
+        });
+      }
     });
   }
   RED.nodes.registerType('rpi-sds011', sds011Sensor);
@@ -114,7 +168,12 @@ module.exports = function(RED) {
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 function sendBuffer(buffer) {
-  serial.write(buffer, 'hex');
+  if (serialMode) {
+    serial.write(buffer, 'hex');
+  }
+  else {
+    tcpip.write(buffer, 'hex');
+  }
 }
 
 // set data reporting mode
