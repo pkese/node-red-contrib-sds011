@@ -11,14 +11,17 @@ const TCP_RECONNECT_TIME = 10000;
 let node;
 let serialMode;
 let serial;
-let tcpip;
+let socket;
+let reconnectTimeout;
 let deviceId;
 
 module.exports = function(RED) {
   function sds011Sensor(config) {
     RED.nodes.createNode(this, config);
     node = this;
+    node.closing = false;
     deviceId = 0xFFFF;
+    reconnectTimeout = null;
     
     serialMode = !config.port.startsWith('tcp://');
     if (serialMode) {
@@ -47,37 +50,49 @@ module.exports = function(RED) {
     }
     else {
       var params = config.port.substring(6).split(':')
-      var tcpipOptions = {
+      var socketOptions = {
         host: params[0],
         port: Number(params[1])
       }
-      tcpip = net.createConnection(tcpipOptions);
-      tcpip.on('connect', function () {
+      node.log("connecting to " + socketOptions.host + ":" + socketOptions.port);
+      node.status({fill:"grey", shape:"dot", text:"connecting"});
+      socket = net.connect(socketOptions);
+      socket.setKeepAlive(true, 120000);
+      socket.on('connect', function () {
+        node.log("connected to " + socketOptions.host + ":" + socketOptions.port);
         node.status({fill: 'green', shape: 'dot', text: 'connected'});
       });
-      tcpip.on('error', function (err) {
-        console.error(JSON.stringify(err));
-        if (err) {
-          node.error('TCP connection error', err);
-        }
+      socket.on('error', function (err) {
+        node.error('TCP connection error', err);
         node.status({fill: 'red', shape: 'ring', text: 'error'});
-        setTimeout(function() {
-          tcpip.connect(tcpipOptions)
+        node.log("reconnecting in " + TCP_RECONNECT_TIME/1000 + " seconds");
+        reconnectTimeout = setTimeout(function() {
+          socket.connect(socketOptions)
         }, TCP_RECONNECT_TIME);
       });
-      tcpip.on('end', function () {
+      socket.on('timeout', function () {
+        node.log("timeout");
         node.status({fill: 'red', shape: 'ring', text: 'disconnected'});
-        setTimeout(function() {
-          tcpip.connect(tcpipOptions)
+        node.log("reconnecting in " + TCP_RECONNECT_TIME/1000 + " seconds");
+        reconnectTimeout = setTimeout(function() {
+          socket.connect(socketOptions)
         }, TCP_RECONNECT_TIME);
       });
-      tcpip.on('timeout', function () {
-        setTimeout(function() {
-          tcpip.connect(tcpipOptions)
-        }, TCP_RECONNECT_TIME);
+      socket.on('end', function () {
+        if (node.closing) {
+          node.status({});
+        }
+        else {
+          node.log("connection lost");
+          node.status({fill: 'red', shape: 'ring', text: 'disconnected'});
+          node.log("reconnecting in " + TCP_RECONNECT_TIME/1000 + " seconds");
+          reconnectTimeout = setTimeout(function() {
+            socket.connect(socketOptions)
+          }, TCP_RECONNECT_TIME);
+        }
       });
       let parser = serialParser();
-      tcpip.on('data', function(data) {
+      socket.on('data', function(data) {
         parser(data);
       });
     }
@@ -145,6 +160,8 @@ module.exports = function(RED) {
     });
 
     node.on('close', function() {
+      node.closing = true;
+
       if (serialMode) {
         serial.close(function(err) {
           if (err) {
@@ -153,11 +170,14 @@ module.exports = function(RED) {
         });
       }
       else {
-        tcpip.close(function(err) {
-          if (err) {
-            node.error('TCP connection close error', err);
-          }
-        });
+        if (socket) {
+          socket.destroy();
+          socket = null;
+        }
+        if (reconnectTimeout) {
+          clearTimeout(reconnectTimeout);
+          reconnectTimeout = null;
+        }
       }
     });
   }
@@ -177,7 +197,7 @@ function sendBuffer(buffer) {
     serial.write(buffer, 'hex');
   }
   else {
-    tcpip.write(buffer);
+    socket.write(buffer);
   }
 }
 

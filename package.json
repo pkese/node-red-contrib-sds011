@@ -1,7 +1,7 @@
 {
   "name": "node-red-contrib-sds011",
-  "version": "1.0.0",
-  "description": "Node-RED node to enable a communication with the SDS011 sensor which is connected via UART/serial connection. This node was designed with the RPi in mind but should work with any serial port.",
+  "version": "1.0.1",
+  "description": "Node-RED node to enable a communication with the SDS011 sensor which is connected via UART/serial or network connection. This node was designed with the RPi in mind but should work with any serial or network port.",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
